@@ -8,7 +8,7 @@ import struct
 import re
 import binascii
 
-g_version = "2.3.2"
+g_version = "2.4.x"
 
 g_file_name = ""
 g_msgtype_list = []
@@ -34,7 +34,7 @@ CMD_Help = 8
 
 JNL_ONE_PAGE_SIZE = 1024*8
 PCK_SIZE_MAX = 1400
-
+REC_SIZE_MAX = 64
 SINGLE_CONTR_NUM_IDX = [2]
 NO_CONTR_NUM_IDX = []
 PASS_CONTR_NUM_IDX = [-1]
@@ -608,43 +608,7 @@ def generateJnl():
         # flush all remaining data
         packPacketData(msg_content_out,packet_header_msg,sequence_num+1-msg_count,msg_count,file_line)
 
-    # flush packets data into jnl file
-    PAGE_OFFSET_IDX = 1
-    PACKAGE_SIZE_IDX = 3
-
-    journal_page_head = [3, 0, JNL_ONE_PAGE_SIZE, int(time.time()), 377494019448199, 2396910000, 55, 0, 0]
-    journal_package_head = [0, 1, 0, 0, 0, 377600777978373]
-
-    total_package_count = len(msg_content_out)
-    package_idx = 0
-    while package_idx < total_package_count:
-        
-        page_len_ctrl = 0
-        page_len_ctrl += PageHeadSize
-        package_output = []
-        while (package_idx < total_package_count):
-            one_packet_data = msg_content_out[package_idx]
-            package_msg_size =  PackageHeadSize + len(one_packet_data)
-            # aligne it by 4 byte
-            aligned_package_msg_size = getSharpByte(package_msg_size)
-            if (page_len_ctrl+aligned_package_msg_size < JNL_ONE_PAGE_SIZE):
-                # enough space, pack this package into current page
-                journal_package_head[PACKAGE_SIZE_IDX] = package_msg_size # update message size in package header
-                package_header_data = struct.pack(PackageHeadFormat, *journal_package_head)
-                package_output.append(package_header_data + one_packet_data + ('\x00'*(aligned_package_msg_size - package_msg_size)))
-                page_len_ctrl += aligned_package_msg_size
-                package_idx += 1
-            else:
-                break # no room left, put it in next page
-
-        # update page offset in page header
-        journal_page_head[PAGE_OFFSET_IDX] = page_len_ctrl #next_package_offset + PageHeadSize
-        page_header_dat = struct.pack(PageHeadFormat, *journal_page_head)
-        
-        journal_file.write(page_header_dat)
-        for index in xrange(len(package_output)):
-            journal_file.write(package_output[index])
-        journal_file.write('\x00'*(JNL_ONE_PAGE_SIZE - page_len_ctrl))
+    writeJnlFile(msg_content_out, journal_file)
     
     text_file.close()
     journal_file.close()
@@ -662,8 +626,8 @@ def generateRecJnl():
 
     msg_content_out = []
 
-    print 'Please stand by...'
-    print 'Generating Rec Jnl'
+    print 'Generating Feed Recovery Journal'
+    print 'Please stand by...'    
     print '->\n %s'%output_file_name
 
     while True:
@@ -709,7 +673,7 @@ def generateRecJnl():
 
         new_msg_size = len(new_msg_dat)
 
-        if (new_msg_size + total_msg_size) < PCK_SIZE_MAX:
+        if (new_msg_size + total_msg_size) < REC_SIZE_MAX:
             # enough room to accommodate it
             file_line += new_msg_dat
             total_msg_size += new_msg_size
@@ -724,6 +688,14 @@ def generateRecJnl():
         # flush all remaining data
         msg_content_out.append(file_line)
 
+    writeJnlFile(msg_content_out, journal_file)
+
+    text_file.close()
+    journal_file.close()
+
+    
+def writeJnlFile(msg_content_out, journal_file):
+    
     # flush packets data into jnl file
     PAGE_OFFSET_IDX = 1
     PACKAGE_SIZE_IDX = 3
@@ -762,10 +734,6 @@ def generateRecJnl():
             journal_file.write(package_output[index])
         journal_file.write('\x00'*(JNL_ONE_PAGE_SIZE - page_len_ctrl))
     
-    text_file.close()
-    journal_file.close()
-
-
 def findGlanceFormat(msg_list,data=None):
     msg_header=''
     msg_body=''
@@ -818,7 +786,7 @@ COMMAND:
     -n <num_of_msg>             Optional, number of messages to interpret
     -s <sequence_number>        Optional, Generate jnl, sequence starts with this number.
     -d <delimiter>              Optional, Delimiter for field seperator, default '|'
-    -r                          Optional, Recovery mode, from TCP
+    -r                          Optional, Recovery mode for data from TCP line.
     -p                          Optional, display packet header, no shown as default.
     -v                          Optional. Show version.
     -h                          Optional. Help info.
