@@ -34,7 +34,7 @@ CMD_Help = 8
 
 JNL_ONE_PAGE_SIZE = 1024*8
 PCK_SIZE_MAX = 1400
-REC_SIZE_MAX = 64
+REC_SIZE_MAX = 512
 SINGLE_CONTR_NUM_IDX = [2]
 NO_CONTR_NUM_IDX = []
 PASS_CONTR_NUM_IDX = [-1]
@@ -149,11 +149,33 @@ PackageHeadFormat = 'IHHIIQ'
 PackageHeadSize = struct.calcsize(PackageHeadFormat)
 PackageHeadProperties = ['dep', 'bf0', 'compid', 'size', 'spare_0', 'hp_counter']
 
-GlanceResponse = '>Hc' #J,Y,R,S,Z
-GlanceLoginAccept = '>HcQ'
-GlanceLoginReject = '>Hcii'
-GlancePasswordChange = '>Hc64s64si'
-GlanceSequencedData = '>Hcc'
+#A,J,S,H,Y,Z | L,R,O,W
+GlanceResponse = '>Hc' # H,Z | R,O 
+# response
+GlanceLoginAccept = '>Hc10sQ' # A
+GlanceLoginReject = '>Hcii' # J
+GlancePasswordChangeResponse = '>Hc64s64si' # Y
+GlanceSequencedData = '>Hcc' # S
+# request
+GlanceLoginRequest = '>Hc64s64s64sii12s' # L
+GlancePasswordChangeRequest = '>Hc64s64s64s64s' # W
+
+GLANCE_FORMAT_MAP = {
+    # heartbeat, session end, logout
+    'H': GlanceResponse,
+    'R': GlanceResponse,
+    'O': GlanceResponse,
+    'Z': GlanceResponse,
+    # login
+    'L': GlanceLoginRequest,
+    'A': GlanceLoginAccept,
+    'J': GlanceLoginReject,
+    # password
+    'W': GlancePasswordChangeRequest,
+    'Y': GlancePasswordChangeResponse,
+    # sequenced data
+    'S': GlanceSequencedData
+    }
 
 def ParsePageHead(read):
     """
@@ -308,7 +330,7 @@ def parseRecoveryMessagePacket(body_data, msgtype_list, sub_id, str_jnl_time_txt
         glance_header_data = struct.unpack(GlanceResponse,body_data[data_start:data_start+struct.calcsize(GlanceResponse)])
         msg_header_format,msg_body_format = findGlanceFormat(glance_header_data,body_data[data_start:])
         output=""
-        if (msg_header_format != ''): # msg login/password change
+        if (msg_header_format != ''):
             message_header = struct.unpack(msg_header_format,body_data[data_start:data_start+struct.calcsize(msg_header_format)])
             for i in xrange(len(message_header)):
                 result.append(str(message_header[i]));
@@ -493,7 +515,7 @@ def interpretJnl():
             if (g_subid_list==[] and sub_id not in g_subid_exclude_list) or (sub_id in g_subid_list):
                 # parse one packet in each package
                 str_jnl_time_txt = formatJnlTime(page_header,package_header)
-                output_content = ''
+                output_content = []
                 num_of_msg = 0
                 if g_rec_mode or sub_id == SUBID_RECOVERY:
                     output_content,num_of_msg = parseRecoveryMessagePacket(message_body, msgtype_list, sub_id, str_jnl_time_txt)
@@ -502,7 +524,8 @@ def interpretJnl():
                 num_of_messages += num_of_msg
 
                 # write to txt file
-                txt_file.write(''.join(output_content))
+                if num_of_msg > 0:
+                    txt_file.write(''.join(output_content))
                 
             package_size = getSharpByte(package_data_size)# get the sharp bytes size
             cursor_offset += package_size
@@ -734,26 +757,22 @@ def writeJnlFile(msg_content_out, journal_file):
             journal_file.write(package_output[index])
         journal_file.write('\x00'*(JNL_ONE_PAGE_SIZE - page_len_ctrl))
     
-def findGlanceFormat(msg_list,data=None):
+def findGlanceFormat(msg_list,raw_data=None):
     msg_header=''
     msg_body=''
     type = msg_list[1]
-    if(type == 'A'):
-        msg_header = GlanceLoginAccept
-    elif(type == 'J'):
-        msg_header = GlanceLoginReject
-    elif(type == 'Y'):
-        msg_header = GlancePasswordChange
-    elif(type == 'R' or type == 'Z'):
-        msg_header = GlanceResponse
-    elif(type == 'S'):
-        msg_header = GlanceSequencedData
+    if type in GLANCE_FORMAT_MAP:
+        msg_header = GLANCE_FORMAT_MAP[type]
+
+    if(type == 'S'):
+        # sequenced data
         msg_type = ''
-        if (len(msg_list)<3) and data is not None:
-            ret = struct.unpack(GlanceSequencedData,data[:struct.calcsize(GlanceSequencedData)])
+        if raw_data is not None: # jnl interpretation
+            ret = struct.unpack(GlanceSequencedData,raw_data[:struct.calcsize(GlanceSequencedData)])
             msg_type = ret[2]
-        else:
+        else: # jnl generation
             msg_type = msg_list[2]
+            
         if msg_type in MESSAGE_FORMAT_MAP:
             msg_body = MESSAGE_FORMAT_MAP[msg_type]
             
