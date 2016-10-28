@@ -136,6 +136,7 @@ PACKET_HEADER_LABEL_LEN = len(PACKET_HEADER_LABEL)
 PACKET_HEADER_LABEL_SEND='<= '
 PACKET_HEADER_LABEL_SEND_LEN = len(PACKET_HEADER_LABEL_SEND)
 PACKET_INFO_END='_> '
+PACKET_INFO_SEND_END='_< '
 PACKET_INFO_END_START = 30
 PACKET_INFO_END_STOP = PACKET_INFO_END_START + len(PACKET_INFO_END)
 
@@ -315,7 +316,7 @@ def makeVariableMatch(match_str, var_num):
         i+=1
     return match_str.replace('?','')[0:start-1]+array_str+match_str[end+1:]
 
-def parseRecoveryMessagePacket(body_data, msgtype_list, sub_id, str_jnl_time_txt):
+def parseRecoveryMessagePacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_time_txt):
     # within one package
     txt_file_output = []
     num_of_messages = 0
@@ -323,6 +324,9 @@ def parseRecoveryMessagePacket(body_data, msgtype_list, sub_id, str_jnl_time_txt
     data_start = 0
 
     body_data_len = len(body_data)
+    packet_info_delimitor = PACKET_INFO_END
+    if is_send_msg:
+        packet_info_delimitor = PACKET_INFO_SEND_END
     while(data_start < body_data_len): # parse message inside one pacakge
         result = []
         processed = False
@@ -360,7 +364,7 @@ def parseRecoveryMessagePacket(body_data, msgtype_list, sub_id, str_jnl_time_txt
             break
         # output message body
         output += g_delimiter.join(result)
-        str_output = ('%s(%u)%s%s%s')%(str_jnl_time_txt,sub_id,PACKET_INFO_END,output,g_CR_LF)
+        str_output = ('%s(%u)%s%s%s')%(str_jnl_time_txt,sub_id,packet_info_delimitor,output,g_CR_LF)
         txt_file_output.append(str_output)
         
         num_of_messages += 1
@@ -471,7 +475,8 @@ def interpretJnl():
             if item not in g_not_msgtype_list:
                 msgtype_list.append(item) 
     else:
-        for item in g_msgtype_list:
+        for raw_item in g_msgtype_list:
+            item = raw_item.strip()
             if (item in MESSAGE_FORMAT_MAP) and (item not in g_not_msgtype_list):
                 msgtype_list.append(item)
     
@@ -518,7 +523,7 @@ def interpretJnl():
                 output_content = []
                 num_of_msg = 0
                 if g_rec_mode or sub_id == SUBID_RECOVERY:
-                    output_content,num_of_msg = parseRecoveryMessagePacket(message_body, msgtype_list, sub_id, str_jnl_time_txt)
+                    output_content,num_of_msg = parseRecoveryMessagePacket(message_body, msgtype_list, sub_id, is_send_msg,str_jnl_time_txt)
                 else:
                     output_content,num_of_msg = parseMessagePacket(message_body, msgtype_list, sub_id, is_send_msg,str_jnl_time_txt)
                 num_of_messages += num_of_msg
@@ -813,7 +818,7 @@ COMMAND:
 Examples:
     >> asx24_journal.py -g D:/ASX24.SJL.txt
     >> asx24_journal.py -i D:/ASX24.SJL 
-    >> asx24_journal.py -i D:/ASX24.SJL  -t "g, O, T"
+    >> asx24_journal.py -i D:/ASX24.SJL  -t "g,O,T"
                               ^                 ^
                         journal_file_name  message type'''%g_version
     print Message
