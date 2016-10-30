@@ -11,6 +11,7 @@ import binascii
 g_version = "2.4.x"
 
 g_file_name = ""
+
 g_msgtype_list = []
 g_not_msgtype_list = []
 g_contrnum_list = []
@@ -24,6 +25,8 @@ g_sequence_num = 0
 g_delimiter = '|'
 g_CR_LF = '\r\n'
 g_rec_mode = False
+g_tcp_data_buffer = []
+g_tcp_data_expected = 0
 
 SUBID_RECOVERY = 3 # from tcp recovery mode, different protocal data format
 
@@ -149,6 +152,7 @@ PageHeadProperties = ['version', 'offset', 'jnl_page_size', 'systime',
 PackageHeadFormat = 'IHHIIQ'
 PackageHeadSize = struct.calcsize(PackageHeadFormat)
 PackageHeadProperties = ['dep', 'bf0', 'compid', 'size', 'spare_0', 'hp_counter']
+
 
 #A,J,S,H,Y,Z | L,R,O,W
 GlanceResponse = '>Hc' # H,Z | R,O 
@@ -316,60 +320,133 @@ def makeVariableMatch(match_str, var_num):
         i+=1
     return match_str.replace('?','')[0:start-1]+array_str+match_str[end+1:]
 
-def parseRecoveryMessagePacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_time_txt):
-    # within one package
+def parseRecoveryPacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_time_txt):
+    global g_tcp_data_expected
+    global g_tcp_data_buffer
+    
     txt_file_output = []
     num_of_messages = 0
 
+    HeaderLengthPart = '>H'
+    header_length_size = 2 #struct.calcsize(HeaderLengthPart)
+    body_data_len = len(body_data)    
     data_start = 0
+    processed_size = 0
 
-    body_data_len = len(body_data)
+    while (data_start < body_data_len):
+        remaining_size = body_data_len - data_start
+        one_msg_ready = False
+        copy_size_offset = 0
+        if(len(g_tcp_data_buffer) == 0):
+            # no buffer, start from begining
+            if (remaining_size >= header_length_size ): # remaining length no less than length in glance header
+                glance_header_len = struct.unpack(HeaderLengthPart,body_data[data_start:data_start+header_length_size])
+                one_msg_size = glance_header_len[0] + header_length_size # msg len =  length + sizeof(lengh part)
+                if (one_msg_size <= remaining_size):
+                    # complete message
+                    copy_size_offset = one_msg_size
+                    one_msg_ready = True
+                else:
+                    # incomplete msg, buffer remaining and wait for rest part
+                    copy_size_offset = remaining_size               
+                    g_tcp_data_expected = one_msg_size - remaining_size
+            else:
+                # smaller then minimal requirement, buffer and wait for rest part
+                copy_size_offset = remaining_size
+                # don't know the msg_size, so set it to zero
+                g_tcp_data_expected = 0 
+            
+        else:
+            # in the middle of a msg, try to copy the expected size
+            if( g_tcp_data_expected == 0):
+                # can't parse the message length in previous reading
+                # read 1 more byte and figure out the msg length
+                g_tcp_data_buffer += body_data[data_start : data_start+1]
+                glance_header_len = struct.unpack(HeaderLengthPart,g_tcp_data_buffer[0:header_length_size])
+                # no need to add len size, since buffer already includes length part
+                g_tcp_data_expected = glance_header_len[0]
+                data_start += 1
+        
+            if(g_tcp_data_expected <= remaining_size):
+                # one complete msg
+                copy_size_offset = g_tcp_data_expected
+                one_msg_ready = True
+            else:
+                # still in complete msg, copy remaining
+                copy_size_offset = remaining_size
+                g_tcp_data_expected -= remaining_size
+
+        # copy data into tcp buffer
+        if g_tcp_data_buffer == []:
+            g_tcp_data_buffer = body_data[data_start: data_start+copy_size_offset]
+        else:
+            g_tcp_data_buffer += body_data[data_start: data_start+copy_size_offset]
+
+        data_start += copy_size_offset
+
+        if one_msg_ready:
+            # one complete messaeg, parse it
+            txt_output = parseRecoveryMessage(msgtype_list, sub_id, is_send_msg,str_jnl_time_txt)
+            # buffer comsumed, clear it
+            g_tcp_data_buffer = []
+            g_tcp_data_expected = 0
+
+            if len(txt_output) > 0:
+                txt_file_output.append(txt_output)
+                num_of_messages += 1
+    
+    return txt_file_output, num_of_messages
+
+def parseRecoveryMessage(msgtype_list, sub_id, is_send_msg,str_jnl_time_txt):
+    # parse one complete message
     packet_info_delimitor = PACKET_INFO_END
     if is_send_msg:
         packet_info_delimitor = PACKET_INFO_SEND_END
-    while(data_start < body_data_len): # parse message inside one pacakge
-        result = []
-        processed = False
-        # process glance message header
-        glance_header_data = struct.unpack(GlanceResponse,body_data[data_start:data_start+struct.calcsize(GlanceResponse)])
-        msg_header_format,msg_body_format = findGlanceFormat(glance_header_data,body_data[data_start:])
-        output=""
-        if (msg_header_format != ''):
-            message_header = struct.unpack(msg_header_format,body_data[data_start:data_start+struct.calcsize(msg_header_format)])
-            for i in xrange(len(message_header)):
-                result.append(str(message_header[i]));
 
-            processed = True
-            data_start += struct.calcsize(msg_header_format)
+    # process glance message header
+    glance_header_data = struct.unpack(GlanceResponse,g_tcp_data_buffer[0:struct.calcsize(GlanceResponse)])  
+    msg_header_format,msg_body_format,seq_msg_type = findGlanceFormat(glance_header_data,g_tcp_data_buffer)
 
-        if (msg_body_format != ''): # msg SequenceData
+    processed = False
+    result = []
+    data_start = 0
+    if (msg_header_format != ''):
+        message_header = struct.unpack(msg_header_format,g_tcp_data_buffer[0:struct.calcsize(msg_header_format)])
+        for i in xrange(len(message_header)):
+            result.append(str(message_header[i]));
+
+        processed = True
+        data_start += struct.calcsize(msg_header_format)
+
+    if (msg_body_format != ''): 
+        # msg SequenceData
+        if (g_msgtype_list == []) or (seq_msg_type in msgtype_list):
             match_map_str = ""
             try:
                 if(msg_body_format[2] == True): # variable message
-                    match_map_str = makeVariableMatch(match_map[0],findJnlVariableNum(match_map[0],body_data[data_start:]))
+                    match_map_str = makeVariableMatch(match_map[0],findJnlVariableNum(match_map[0],g_tcp_data_buffer[data_start:]))
                 else:    
                     match_map_str = msg_body_format[0]
-                message_body = struct.unpack(match_map_str, body_data[data_start:data_start+struct.calcsize(match_map_str)])
+
+                # parse message boday part
+                message_body = struct.unpack(match_map_str, g_tcp_data_buffer[data_start:data_start+struct.calcsize(match_map_str)])
                 
                 for i in xrange(len(message_body)):
                     result.append(str(message_body[i]));
                 
             except Exception,ex:
                 print Exception,":",ex
-                num_of_messages += 1
-            processed = True    
-            data_start += struct.calcsize(match_map_str)
 
-        if not processed:
-            break
+            processed = True
+
+    str_output = ''
+    if processed:
         # output message body
+        output = ''
         output += g_delimiter.join(result)
         str_output = ('%s(%u)%s%s%s')%(str_jnl_time_txt,sub_id,packet_info_delimitor,output,g_CR_LF)
-        txt_file_output.append(str_output)
         
-        num_of_messages += 1
-                            
-    return txt_file_output,num_of_messages
+    return str_output
     
 def parseMessagePacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_time_txt):
     global g_hit_msg_max
@@ -415,7 +492,7 @@ def parseMessagePacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_time
         count_each_packet += 1
 
         # filter by message type
-        if type in msgtype_list:
+        if (g_msgtype_list == []) or (type in msgtype_list):
             result.append(str(size))
             result.append(type)
             # parse message body
@@ -485,6 +562,7 @@ def interpretJnl():
     txt_file = open(output_file_name, 'w')
 
     g_hit_msg_max = False
+
     while True:
         page_header = ProcessPageHead(jnl_file) # read page header
         if page_header == {} or g_hit_msg_max:
@@ -523,7 +601,7 @@ def interpretJnl():
                 output_content = []
                 num_of_msg = 0
                 if g_rec_mode or sub_id == SUBID_RECOVERY:
-                    output_content,num_of_msg = parseRecoveryMessagePacket(message_body, msgtype_list, sub_id, is_send_msg,str_jnl_time_txt)
+                    output_content,num_of_msg = parseRecoveryPacket(message_body, msgtype_list, sub_id, is_send_msg,str_jnl_time_txt)
                 else:
                     output_content,num_of_msg = parseMessagePacket(message_body, msgtype_list, sub_id, is_send_msg,str_jnl_time_txt)
                 num_of_messages += num_of_msg
@@ -765,13 +843,13 @@ def writeJnlFile(msg_content_out, journal_file):
 def findGlanceFormat(msg_list,raw_data=None):
     msg_header=''
     msg_body=''
+    msg_type = ''
     type = msg_list[1]
     if type in GLANCE_FORMAT_MAP:
         msg_header = GLANCE_FORMAT_MAP[type]
 
     if(type == 'S'):
         # sequenced data
-        msg_type = ''
         if raw_data is not None: # jnl interpretation
             ret = struct.unpack(GlanceSequencedData,raw_data[:struct.calcsize(GlanceSequencedData)])
             msg_type = ret[2]
@@ -780,8 +858,9 @@ def findGlanceFormat(msg_list,raw_data=None):
             
         if msg_type in MESSAGE_FORMAT_MAP:
             msg_body = MESSAGE_FORMAT_MAP[msg_type]
-            
-    return msg_header,msg_body
+
+    # return glance header format, sequence msg format, sequence msg type        
+    return msg_header,msg_body,msg_type
     
 def packPacketData(jnl_file_output,pkt_header,sequence,count,message_body):
     pkt_header[2] = count
