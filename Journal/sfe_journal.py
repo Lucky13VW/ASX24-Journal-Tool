@@ -25,7 +25,7 @@ g_sequence_num = 0
 g_delimiter = '|'
 g_CR_LF = '\r\n'
 g_rec_mode = False
-g_tcp_data_buffer = []
+g_tcp_data_buffer = ''
 g_tcp_data_expected = 0
 
 SUBID_RECOVERY = 3 # from tcp recovery mode, different protocal data format
@@ -377,10 +377,7 @@ def parseRecoveryPacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_tim
                 g_tcp_data_expected -= remaining_size
 
         # copy data into tcp buffer
-        if g_tcp_data_buffer == []:
-            g_tcp_data_buffer = body_data[data_start: data_start+copy_size_offset]
-        else:
-            g_tcp_data_buffer += body_data[data_start: data_start+copy_size_offset]
+        g_tcp_data_buffer += body_data[data_start: data_start+copy_size_offset]
 
         data_start += copy_size_offset
 
@@ -388,7 +385,7 @@ def parseRecoveryPacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_tim
             # one complete messaeg, parse it
             txt_output = parseRecoveryMessage(msgtype_list, sub_id, is_send_msg,str_jnl_time_txt)
             # buffer comsumed, clear it
-            g_tcp_data_buffer = []
+            g_tcp_data_buffer = ''
             g_tcp_data_expected = 0
 
             if len(txt_output) > 0:
