@@ -1,0 +1,20 @@
+<Services>
+    <!--<Server Name="UDP2">
+        <Protocal>UDP</Protocal>
+        <Ip>127.0.0.1</Ip>
+        <Port>17910</Port>
+        <Data>
+            <Rule Seq="2" Count="3" SessID="1454229234">save_gap2.sjl</Rule>
+            <Rule Seq="8" Count="5">output_gap0.dat</Rule>
+        </Data>
+    </Server> -->
+    <Server Name="TCP3">
+        <Protocal>TCP</Protocal>
+        <Ip>127.0.0.1</Ip>
+        <Port>17810</Port>
+        <Data>
+          <Rule User="tr1" Pass="123" Mem="REU" Ver="0.1.0">save_rec.sjl</Rule>
+          <!--<Rule User="tr2" Pass="321" Mem="888" Ver="1.2.3">recovery2.dat</Rule>-->
+        </Data>
+    </Server>
+</Services>

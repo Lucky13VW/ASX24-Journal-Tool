@@ -1,0 +1,22 @@
+<Services>
+    <Server Name="UDP2">
+        <Protocal>UDP</Protocal>
+        <Ip></Ip>
+        <Port>17910</Port>
+        <Data>
+            <!--<Rule Seq="0">gap10974_10.sjl</Rule>
+	    <Rule Seq="0">gap_msg144.sjl</Rule>
+	    <Rule Seq="0">gap_4.sjl</Rule>-->
+	    <Rule Seq="0">gap_6_7.sjl</Rule>
+        </Data>
+    </Server>
+    <Server Name="TCP3">
+        <Protocal>TCP</Protocal>
+        <Ip></Ip>
+        <Port>17810</Port>
+        <Data>
+            <Rule User="tr1" Pass="123" Mem="REU" Ver="0.1.0" Expired="false">feed_msg.sjl</Rule>
+            <!-- <Rule User="tr2" Pass="321" Mem="888" Ver="1.2.3" Expired="false">rtest.sjl</Rule> -->
+        </Data>
+    </Server>
+</Services>
