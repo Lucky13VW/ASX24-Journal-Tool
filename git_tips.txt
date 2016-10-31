@@ -1,0 +1,6 @@
+# review where origin links to
+git remove -v
+# rename the project name, redirect local to it
+git remote set-url origin git@github.com:Lucky13VW/ASX24-Tools.git
+# undo git add xxx.txt
+git reset HEAD xxx.txt

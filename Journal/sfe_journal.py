@@ -402,7 +402,7 @@ def parseRecoveryMessage(msgtype_list, sub_id, is_send_msg,str_jnl_time_txt):
 
     # process glance message header
     glance_header_data = struct.unpack(GlanceResponse,g_tcp_data_buffer[0:struct.calcsize(GlanceResponse)])  
-    msg_header_format,msg_body_format,seq_msg_type = findGlanceFormat(glance_header_data,g_tcp_data_buffer)
+    msg_header_format,msg_body_format,seq_msg_type = findGlanceFormatForI(glance_header_data,g_tcp_data_buffer)
 
     processed = False
     result = []
@@ -757,7 +757,7 @@ def generateRecJnl():
         if len(msg_list) < 3:
             continue
 
-        msg_header_format,msg_body_format = findGlanceFormat(msg_list)
+        msg_header_format,msg_body_format = findGlanceFormatForG(msg_list)
 
         body_start_index = 3
         
@@ -838,7 +838,8 @@ def writeJnlFile(msg_content_out, journal_file):
             journal_file.write(package_output[index])
         journal_file.write('\x00'*(JNL_ONE_PAGE_SIZE - page_len_ctrl))
     
-def findGlanceFormat(msg_list,raw_data=None):
+def findGlanceFormatForI(msg_list,raw_data):
+    # used for glance interpretation
     msg_header=''
     msg_body=''
     msg_type = ''
@@ -848,17 +849,33 @@ def findGlanceFormat(msg_list,raw_data=None):
 
     if(type == 'S'):
         # sequenced data
-        if raw_data is not None: # jnl interpretation
-            ret = struct.unpack(GlanceSequencedData,raw_data[:struct.calcsize(GlanceSequencedData)])
-            msg_type = ret[2]
-        else: # jnl generation
-            msg_type = msg_list[2]
+        ret = struct.unpack(GlanceSequencedData,raw_data[:struct.calcsize(GlanceSequencedData)])
+        msg_type = ret[2]
             
         if msg_type in MESSAGE_FORMAT_MAP:
             msg_body = MESSAGE_FORMAT_MAP[msg_type]
 
     # return glance header format, sequence msg format, sequence msg type        
     return msg_header,msg_body,msg_type
+
+def findGlanceFormatForG(msg_list):
+    # used for glance generation
+    msg_header=''
+    msg_body=''
+    type = msg_list[1]
+    if type in GLANCE_FORMAT_MAP:
+        msg_header = GLANCE_FORMAT_MAP[type]
+
+    if(type == 'S'):
+        # sequenced data
+        msg_type = msg_list[2]
+            
+        if msg_type in MESSAGE_FORMAT_MAP:
+            msg_body = MESSAGE_FORMAT_MAP[msg_type]
+
+    # return glance header format, sequence msg format
+    return msg_header,msg_body
+
     
 def packPacketData(jnl_file_output,pkt_header,sequence,count,message_body):
     pkt_header[2] = count

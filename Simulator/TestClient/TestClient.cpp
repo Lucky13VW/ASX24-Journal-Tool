@@ -13,6 +13,8 @@
 #include <memory>
 #include "../ASX24ExSimulator/ProtMsgs.hpp"
 #include <time.h>
+#include <thread>
+#include <algorithm>
 
 using namespace std;
 
@@ -45,6 +47,17 @@ bool ParseConfig(vector<shared_ptr<ClientInfor>> &clinet_infor)
     {
         auto pClient = make_shared<ClientInfor>();
         xml_attribute<> *attr_name = NodeObj->first_attribute("Name");
+        xml_attribute<> *attr_enable = NodeObj->first_attribute("Enable");
+        bool is_enabled = true;
+        if (attr_enable != NULL )
+        {
+            string str_enable = attr_enable->value();
+            transform(str_enable.begin(), str_enable.end(), str_enable.begin(), tolower);
+            if (str_enable == "false")
+            {
+                is_enabled = false;
+            }
+        }
         xml_node<> *IpNode = GetNode(NodeObj,"Ip");
         xml_node<> *PortNode = GetNode(NodeObj,"Port");
         xml_node<> *ProtocalNode = GetNode(NodeObj,"Protocal");
@@ -88,7 +101,7 @@ bool ParseConfig(vector<shared_ptr<ClientInfor>> &clinet_infor)
                 is_ok=true;
                 RuleNode = RuleNode->next_sibling("Rule");
             }
-            clinet_infor.push_back(pClient);
+            if(is_enabled) clinet_infor.push_back(pClient);
         }
         else
         {
@@ -100,13 +113,9 @@ bool ParseConfig(vector<shared_ptr<ClientInfor>> &clinet_infor)
     return is_ok;
 }
 
-#define MAX_THREAD_LIMIT 20
-HANDLE hStopEvents[MAX_THREAD_LIMIT];
 
-DWORD WINAPI TestingThreadUDP(LPVOID lpParam)
+void TestingThreadUDP(shared_ptr<ClientInfor> client_info)
 {
-    shared_ptr<ClientInfor> client_info=*static_cast<shared_ptr<ClientInfor>*>(lpParam);
-
     WSADATA              wsaData;
     SOCKET               SendingSocket;
     SOCKADDR_IN          ReceiverAddr;
@@ -212,10 +221,6 @@ DWORD WINAPI TestingThreadUDP(LPVOID lpParam)
 
     closesocket(SendingSocket);
     WSACleanup();
-    
-    SetEvent(client_info->stop_event);
-    
-    return 0;
 }
 
 struct SendInfo
@@ -241,10 +246,8 @@ DWORD WINAPI HeartbeatThread(LPVOID lpParam)
     return 0;
 }
 
-DWORD WINAPI TestingThreadTCP(LPVOID lpParam)
+void TestingThreadTCP(shared_ptr<ClientInfor> client_info)
 { 
-    shared_ptr<ClientInfor> client_info=*static_cast<shared_ptr<ClientInfor>*>(lpParam);
-
     WSADATA              wsaData;
     SOCKET               ClientSocket;
     SOCKADDR_IN          ServerAddr;
@@ -291,7 +294,7 @@ DWORD WINAPI TestingThreadTCP(LPVOID lpParam)
         }
         else
         {
-            printf("[%s]Connected to %s\n",client_info->name.c_str(),inet_ntoa(ServerAddr.sin_addr),ntohs(ServerAddr.sin_port));
+            printf("[%s]Connected to %s at %u\n",client_info->name.c_str(),inet_ntoa(ServerAddr.sin_addr),ntohs(ServerAddr.sin_port));
         }
 
         int sent_data_size = send(ClientSocket, SendBuf, sizeof(request), 0);
@@ -314,7 +317,7 @@ DWORD WINAPI TestingThreadTCP(LPVOID lpParam)
         {
             SendInfo *send_infor = new SendInfo();
             send_infor->send_sock = ClientSocket;
-            send_infor->evt_stop = CreateEvent(NULL,true,false,NULL);
+            //send_infor->evt_stop = CreateEvent(NULL,true,false,NULL);
             HANDLE worker = CreateThread(NULL, 0, HeartbeatThread, (LPVOID)(send_infor),0,NULL);
 
             memset(ReceiveBuf,0,TCP_BUFF_SIZE);
@@ -376,49 +379,33 @@ DWORD WINAPI TestingThreadTCP(LPVOID lpParam)
         shutdown(ClientSocket,0);
         closesocket(ClientSocket);
     }
-
-    
     WSACleanup();
-    
-    SetEvent(client_info->stop_event);
-    
-    return 0;
 }
 
 int _tmain(int argc, char* argv[])
 {
-    vector<shared_ptr<ClientInfor>> g_client_infor;
-    if (!ParseConfig(g_client_infor))
+    vector<shared_ptr<ClientInfor>> client_infors;
+    
+    if (!ParseConfig(client_infors))
         return -1;
 
-    for (int j=0;j<MAX_THREAD_LIMIT;j++)
-        hStopEvents[j] = NULL;
-
-    DWORD (WINAPI *worker_thread)(LPVOID) = TestingThreadUDP;
-    int thread_count =0;
-    for (int i = 0; i<g_client_infor.size(); i++)
+    vector<thread> client_threads;    
+    
+    for(auto cur_info : client_infors)
     {
-        ++thread_count;
-        hStopEvents[i] =  CreateEvent(NULL,true,false,NULL);
-        g_client_infor[i]->stop_event = hStopEvents[i];
-        if (g_client_infor[i]->prot == ProTCP)
+        if (cur_info->prot == ProTCP)
         {
-            worker_thread = TestingThreadTCP;
+            client_threads.push_back(thread(TestingThreadTCP, cur_info));
         }
-        HANDLE worker = CreateThread(NULL, 0, worker_thread, (LPVOID)(&g_client_infor[i]), 0, NULL);
-        if (worker == NULL)
+        else
         {
-            fprintf(stderr, "CreateThread failed: %d\n", GetLastError());
-            return -2;
+            client_threads.push_back(thread(TestingThreadUDP, cur_info));
         }
     }
-
-    WaitForMultipleObjects(thread_count,hStopEvents,true,INFINITE);
-
-    for (int k=0;k<thread_count;k++)
+    
+    for (int i = 0; i < client_threads.size(); i++)
     {
-        CloseHandle(hStopEvents[k]);
-        hStopEvents[k] = NULL;
+        client_threads[i].join();
     }
     return 0;
 
