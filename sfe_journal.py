@@ -592,14 +592,15 @@ def interpretJnl():
             message_body = jnl_page_data[cursor_offset+PackageHeadSize : cursor_offset+package_data_size]
 
             sub_id = package_header['bf0'] >> 8 & 0x00FF
-            is_send_msg = False
-            if (package_header['bf0'] & 0x0020) > 0 :
-                is_send_msg = True
+            
             if (g_subid_list==[] and sub_id not in g_subid_exclude_list) or (sub_id in g_subid_list):
                 # parse one packet in each package
                 str_jnl_time_txt = formatJnlTime(page_header,package_header)
                 output_content = []
                 num_of_msg = 0
+                is_send_msg = False
+                if (package_header['bf0'] & 0x0020) > 0 :
+                    is_send_msg = True
                 if g_rec_mode or sub_id == SUBID_RECOVERY:
                     output_content,num_of_msg = parseRecoveryPacket(message_body, msgtype_list, sub_id, is_send_msg,str_jnl_time_txt)
                 else:
