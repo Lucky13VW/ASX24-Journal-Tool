@@ -73,7 +73,7 @@ bool ParseConfig(vector<shared_ptr<ClientInfor>> &clinet_infor)
             }
             else
             {
-                pClient->prot=ProTCP;
+                pClient->prot = ProTCP;
             }
             // parse rules
             
@@ -223,39 +223,42 @@ void TestingThreadUDP(shared_ptr<ClientInfor> client_info)
     WSACleanup();
 }
 
-struct SendInfo
+bool SendData(SOCKET client_socket, char *send_buff, size_t send_size)
 {
-    HANDLE evt_stop;
-    SOCKET send_sock;
-};
-
-DWORD WINAPI HeartbeatThread(LPVOID lpParam)
-{
-    SendInfo *send_info = static_cast<SendInfo*>(lpParam);
-    ClientHeartbeat heartbeat;
-    heartbeat.type = 'R';
-    heartbeat.length = ReverseEndian(uint16_t(1));
-    char SendBuf[sizeof(heartbeat)];
-    memcpy_s(&SendBuf,sizeof(SendBuf),&heartbeat,sizeof(heartbeat));
-    while(WAIT_TIMEOUT == WaitForSingleObject(send_info->evt_stop,2000))
+    int total_sent_data = 0;
+    int sent_data_size = 0;
+    while (total_sent_data < send_size)
     {
-        int data_size = send(send_info->send_sock, SendBuf, sizeof(SendBuf), 0);
-        printf("Heartbeat(%d)\n",data_size);
+        sent_data_size = send(client_socket, send_buff + total_sent_data, send_size - total_sent_data, 0);
+        if(sent_data_size < 0)
+        {
+            cout << "SendData: send error:" << sent_data_size << endl;
+            break;
+        }
+        else
+        {
+            total_sent_data += sent_data_size;
+        }
     }
-    delete send_info;
-    return 0;
+    return (total_sent_data == send_size);
 }
+
+#define TCP_RECV_BUF_SIZE 1024*2
+#define TCP_SEND_BUF_SIZE 1024
+static size_t tcp_data_expected = 0;
+static char tcp_data_buffer[TCP_BUFF_SIZE];
 
 void TestingThreadTCP(shared_ptr<ClientInfor> client_info)
 { 
+    
     WSADATA              wsaData;
     SOCKET               ClientSocket;
     SOCKADDR_IN          ServerAddr;
     const char*          ip_addr_s = client_info->ip.c_str();
     int                  Port = client_info->port;
     
-    char                 SendBuf[TCP_BUFF_SIZE];
-    char                 ReceiveBuf[TCP_BUFF_SIZE];
+    char                 SendBuf[TCP_SEND_BUF_SIZE];
+    char                 ReceiveBuf[TCP_RECV_BUF_SIZE];
 
 
     // Initialize Winsock version 2.2
@@ -271,115 +274,155 @@ void TestingThreadTCP(shared_ptr<ClientInfor> client_info)
         ServerAddr.sin_port = htons(Port);    
         ServerAddr.sin_addr.s_addr = inet_addr(ip_addr_s);
 
-        uint32_t net_time_out = 2000; // 1000 ms
+        uint32_t net_time_out = 2000; // ms
         setsockopt(ClientSocket, SOL_SOCKET, SO_RCVTIMEO, (char*)&net_time_out,sizeof(int));
-        const RequestRule &request_info = (*iter);
-        // Send a datagram to the receiver.
-        memset(SendBuf,0,TCP_BUFF_SIZE);
-        LoginRequest request;
-        memset(&request,0,sizeof(request));
-        memcpy_s(request.username,sizeof(request.username),request_info.user.c_str(),request_info.user.length());
-        memcpy_s(request.password,sizeof(request.password),request_info.pass.c_str(),request_info.pass.length());
-        memcpy_s(request.member, sizeof(request.member), request_info.mem.c_str(), request_info.mem.length());
-        memcpy_s(request.version, sizeof(request.version), request_info.ver.c_str(), request_info.ver.length());
-        request.type = 'L';
-        request.length = ReverseEndian(sizeof(LoginRequest)-sizeof(request.length));
-        request.requested_sequence_number = ReverseEndian(1);
-        memcpy_s(SendBuf,TCP_BUFF_SIZE,&request,sizeof(request));
         
-        if(-1 == connect(ClientSocket,(SOCKADDR *)&ServerAddr, sizeof(ServerAddr)))
+        if (-1 == connect(ClientSocket, (SOCKADDR *)&ServerAddr, sizeof(ServerAddr)))
         {
             fprintf(stderr, "Failed to connect err(%d)\n", GetLastError());
-            break;
+            continue;
         }
         else
         {
-            printf("[%s]Connected to %s at %u\n",client_info->name.c_str(),inet_ntoa(ServerAddr.sin_addr),ntohs(ServerAddr.sin_port));
+            printf("[%s]Connected to %s at %u\n", client_info->name.c_str(), inet_ntoa(ServerAddr.sin_addr), ntohs(ServerAddr.sin_port));
         }
-
-        int sent_data_size = send(ClientSocket, SendBuf, sizeof(request), 0);
-        if (sent_data_size>0)
+      
+        if (SendLoginRequest(ClientSocket, SendBuf, TCP_SEND_BUF_SIZE, *iter))
         {
-            printf("[%s]=>LoginRequest(%s,%s),%u\n",client_info->name.c_str(),request.username,request.password,sent_data_size);
+            printf("[%s]=>LoginRequest(usr:%s,pw:%s,mem:%s,ver:%s)\n", client_info->name.c_str(),
+                request.username, request.password, request.member, request.version);
         }
         else
         {
-            printf("[%s]send failed!\n",client_info->name.c_str());
+            printf("[%s]LoginRequest failed!\n", client_info->name.c_str());
+            continue;
         }
-        memset(ReceiveBuf,0,TCP_BUFF_SIZE);
         
-        int data_size = recv(ClientSocket, ReceiveBuf, TCP_BUFF_SIZE, 0);
-        const LoginAccepted *return_data = reinterpret_cast<const LoginAccepted *>(ReceiveBuf);
-        char login_status = return_data->type;
         
-        printf("[%s]<=LoginStatus(%c),%c\n",client_info->name.c_str(),login_status,data_size);
-        if (login_status == 'A')
+        int recv_data_size = 0;
+        while (true)
         {
-            SendInfo *send_infor = new SendInfo();
-            send_infor->send_sock = ClientSocket;
-            //send_infor->evt_stop = CreateEvent(NULL,true,false,NULL);
-            HANDLE worker = CreateThread(NULL, 0, HeartbeatThread, (LPVOID)(send_infor),0,NULL);
-
-            memset(ReceiveBuf,0,TCP_BUFF_SIZE);
-            int data_size_recv = 0,data_processed = 0;
-            bool is_last_pck = false;
-            while(true)
+            recv_data_size = recv(ClientSocket, ReceiveBuf, TCP_RECV_BUF_SIZE, 0);
+            
+            if (recv_data_size >0 )
             {
-                int data_size = recv(ClientSocket, ReceiveBuf + data_size_recv, TCP_BUFF_SIZE - data_size_recv, 0);
-                if (data_size <= 0)
-                {
-                    printf("[%s] Waiting for data, timeout\n",client_info->name.c_str());
-                    break;
-                }
-                data_size_recv += data_size;
-                printf("[%s]<=Data(%d|%d)\n",client_info->name.c_str(),data_size,data_size_recv);
+                if(ProcessRecv(ReceiveBuf, recv_data_size))
+                    ProcessSend();
             }
-            if (data_size_recv <= sizeof(GlanceResponseHeader))
+            else
             {
-                printf("[%s] Data less than min\n", client_info->name.c_str());
-                continue;
-            }
-            string output_file(request_info.output_file);
-            ofstream data_file(output_file.c_str(),ios::binary);
-
-            char sjl_buffer[1024 * 8] = { 0 };
-
-            SjlPackageHeader sjl_package;
-            sjl_package.size = data_size_recv + sizeof(sjl_package);
-            sjl_package.bf0 = 1;
-            sjl_package.hp_counter = 377600777978373;
-
-            SjlPageHeader sjl_page;
-            sjl_page.version = 3;
-            sjl_page.jnl_page_size = sizeof(sjl_buffer);
-            sjl_page.offset = sizeof(sjl_package) + sizeof(sjl_page) + data_size_recv;
-            sjl_page.systime = time(NULL);
-            sjl_page.hp_counter = 377494019448199;
-            sjl_page.hp_frequency = 2396910000;
-            sjl_page.millisec = 55;
-
-            size_t written_len = 0;
-            memcpy(sjl_buffer, &sjl_page, sizeof(sjl_page));
-            written_len += sizeof(sjl_page);
-
-            memcpy(sjl_buffer + written_len, &sjl_package, sizeof(sjl_package));
-            written_len += sizeof(sjl_package);
-
-            memcpy(sjl_buffer + written_len, &ReceiveBuf, data_size_recv);
-            written_len += data_size_recv;
-
-            if(data_file.is_open())
-            {
-                data_file.write(sjl_buffer, sizeof(sjl_buffer));
-                data_file.flush();
-                data_file.close();
-                printf("[%s]JnlFile=>%s\n",client_info->name.c_str(),output_file.c_str());
+                cout << "recv: time out, quit! " << recv_data_size << endl;
             }
         }
+        
         shutdown(ClientSocket,0);
         closesocket(ClientSocket);
     }
     WSACleanup();
+    
+}
+
+bool SendLoginRequest(SOCKET ClientSocket, char *SendBuf, size_t SendBufSize, const RequestRule &request_info)
+{
+    // try to login request
+    memset(SendBuf, 0, SendBufSize);
+    LoginRequest request;
+    memset(&request, 0, sizeof(request));
+    memcpy_s(request.username, sizeof(request.username), request_info.user.c_str(), request_info.user.length());
+    memcpy_s(request.password, sizeof(request.password), request_info.pass.c_str(), request_info.pass.length());
+    memcpy_s(request.member, sizeof(request.member), request_info.mem.c_str(), request_info.mem.length());
+    memcpy_s(request.version, sizeof(request.version), request_info.ver.c_str(), request_info.ver.length());
+    request.type = 'L';
+    request.length = ReverseEndian(sizeof(LoginRequest) - sizeof(request.length));
+    request.requested_sequence_number = ReverseEndian(0);
+    memcpy_s(SendBuf, SendBufSize, &request, sizeof(request));
+
+    return SendData(ClientSocket, SendBuf, sizeof(request));
+}
+
+bool ProcessRecv(char *data_buffer, size_t data_size)
+{
+    if (tcp_data_expected == 0)
+    {
+
+    }
+
+    const GlanceResponseHeader *return_data = reinterpret_cast<const LoginAccepted *>(ReceiveBuf);
+    char login_status = return_data->type;
+
+    printf("[%s]<=LoginStatus(%c),%c\n",client_info->name.c_str(),login_status,data_size);
+    if (login_status == 'A')
+    {
+    SendInfo *send_infor = new SendInfo();
+    send_infor->send_sock = ClientSocket;
+    //send_infor->evt_stop = CreateEvent(NULL,true,false,NULL);
+    HANDLE worker = CreateThread(NULL, 0, HeartbeatThread, (LPVOID)(send_infor),0,NULL);
+
+    memset(ReceiveBuf,0,TCP_BUFF_SIZE);
+    int data_size_recv = 0,data_processed = 0;
+    bool is_last_pck = false;
+    while(true)
+    {
+    int data_size = recv(ClientSocket, ReceiveBuf + data_size_recv, TCP_BUFF_SIZE - data_size_recv, 0);
+    if (data_size <= 0)
+    {
+    printf("[%s] Waiting for data, timeout\n",client_info->name.c_str());
+    break;
+    }
+    data_size_recv += data_size;
+    printf("[%s]<=Data(%d|%d)\n",client_info->name.c_str(),data_size,data_size_recv);
+    }
+    if (data_size_recv <= sizeof(GlanceResponseHeader))
+    {
+    printf("[%s] Data less than min\n", client_info->name.c_str());
+    continue;
+    }
+    string output_file(request_info.output_file);
+    ofstream data_file(output_file.c_str(),ios::binary|ios::app);
+
+    char sjl_buffer[1024 * 8] = { 0 };
+
+    SjlPackageHeader sjl_package;
+    sjl_package.size = data_size_recv + sizeof(sjl_package);
+    sjl_package.bf0 = 1;
+    sjl_package.hp_counter = 377600777978373;
+
+    SjlPageHeader sjl_page;
+    sjl_page.version = 3;
+    sjl_page.jnl_page_size = sizeof(sjl_buffer);
+    sjl_page.offset = sizeof(sjl_package) + sizeof(sjl_page) + data_size_recv;
+    sjl_page.systime = time(NULL);
+    sjl_page.hp_counter = 377494019448199;
+    sjl_page.hp_frequency = 2396910000;
+    sjl_page.millisec = 55;
+
+    size_t written_len = 0;
+    memcpy(sjl_buffer, &sjl_page, sizeof(sjl_page));
+    written_len += sizeof(sjl_page);
+
+    memcpy(sjl_buffer + written_len, &sjl_package, sizeof(sjl_package));
+    written_len += sizeof(sjl_package);
+
+    memcpy(sjl_buffer + written_len, &ReceiveBuf, data_size_recv);
+    written_len += data_size_recv;
+
+    if(data_file.is_open())
+    {
+    data_file.write(sjl_buffer, sizeof(sjl_buffer));
+    data_file.flush();
+    data_file.close();
+    printf("[%s]JnlFile=>%s\n",client_info->name.c_str(),output_file.c_str());
+    }
+    
+}
+
+void ProcessSend(SOCKET client_socket, char *send_buffer, size_t send_size)
+{
+    ClientHeartbeat heartbeat;
+    heartbeat.type = 'R';
+    heartbeat.length = ReverseEndian(uint16_t(1));
+    memcpy_s(send_buffer, TCP_BUFF_SIZE, &heartbeat, sizeof(heartbeat));
+    SendData(client_socket,send_buffer,send_size);
 }
 
 int _tmain(int argc, char* argv[])

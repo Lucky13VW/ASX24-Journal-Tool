@@ -129,7 +129,7 @@ struct SjlPackageHeader
 
 #define UDP_BUFF_SIZE 1024*4
 #define UDP_SIZE_MAX 1472
-#define TCP_BUFF_SIZE 1024*1024*4
+#define TCP_BUFF_SIZE 1024*32
 
 enum ProtocalType
 {

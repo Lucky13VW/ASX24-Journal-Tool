@@ -383,8 +383,13 @@ def parseRecoveryPacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_tim
 
         if one_msg_ready:
             # one complete messaeg, parse it
-            txt_output = parseRecoveryMessage(msgtype_list, sub_id, is_send_msg,str_jnl_time_txt)
-            # buffer comsumed, clear it
+            txt_output = ''
+            try:
+                txt_output = parseRecoveryMessage(msgtype_list, sub_id, is_send_msg,str_jnl_time_txt)
+            except Exception,ex:
+                print Exception,":",ex
+                
+            # buffer comsumed, clear it    
             g_tcp_data_buffer = ''
             g_tcp_data_expected = 0
 

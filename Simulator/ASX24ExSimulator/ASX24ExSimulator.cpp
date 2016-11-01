@@ -330,6 +330,26 @@ struct DataSendInfor
     string server_name;
 };
 
+size_t SendData(SOCKET client_socket, char *send_buff, size_t send_size)
+{
+    int total_sent_data = 0;
+    int sent_data_size = 0;
+    while (total_sent_data < send_size)
+    {
+        sent_data_size = send(client_socket, send_buff + total_sent_data, send_size - total_sent_data, 0);
+        if (sent_data_size < 0)
+        {
+            cout << "SendData: send error:" << sent_data_size << endl;
+            break;
+        }
+        else
+        {
+            total_sent_data += sent_data_size;
+        }
+    }
+    return total_sent_data;
+}
+
 void MakeGlanceResponse(DataRule *data_rule, char *WriteData, size_t &WriteLen)
 {
     // assume all data in one package
@@ -399,14 +419,10 @@ DWORD WINAPI DataSendThread(LPVOID lpParam)
         printf("[%s]DataTransfering(Total:%d)...\n",server_name,send_data_size);
     }*/
 
-
-    size_t total_sent_data = 0;
-    while(total_sent_data < send_data_size)
-    {
-        int sent_data_size = send(client_sockfd,SendBuf+total_sent_data,send_data_size-total_sent_data,0);
-        total_sent_data += sent_data_size;
-        printf("[%s]=>Data(%d|%d)\n",server_name,sent_data_size,total_sent_data);
-    }
+    
+    size_t total_sent_data = SendData(client_sockfd, SendBuf, send_data_size);
+    printf("[%s]=>SequencedData(%d bytes)\n",server_name,total_sent_data);
+    
 
     /*send(client_sockfd,SendBuf,1,0);
     send(client_sockfd,SendBuf+1,1,0);
