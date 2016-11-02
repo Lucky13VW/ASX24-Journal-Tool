@@ -412,19 +412,25 @@ def parseRecoveryMessage(msgtype_list, sub_id, is_send_msg,str_jnl_time_txt):
     processed = False
     result = []
     data_start = 0
-    if (msg_header_format != ''):
-        message_header = struct.unpack(msg_header_format,g_tcp_data_buffer[0:struct.calcsize(msg_header_format)])
-        for i in xrange(len(message_header)):
-            result.append(str(message_header[i]));
 
-        processed = True
-        data_start += struct.calcsize(msg_header_format)
+    if (g_msgtype_list == []) or (seq_msg_type in msgtype_list):
+        # interested msg type
+        if (msg_header_format != ''):
+            message_header = struct.unpack(msg_header_format,g_tcp_data_buffer[0:struct.calcsize(msg_header_format)])
+            for i in xrange(len(message_header)):
+                result.append(str(message_header[i]));
 
-    if (msg_body_format != ''): 
-        # msg SequenceData
-        if (g_msgtype_list == []) or (seq_msg_type in msgtype_list):
-            match_map_str = ""
-            try:
+            processed = True
+            data_start += struct.calcsize(msg_header_format)
+
+        if (msg_body_format != ''):
+            # msg SequenceData
+            match_map = MESSAGE_FORMAT_MAP.get(seq_msg_type,())
+            if(len(match_map)==0):
+                str_warning = ('%s(%u)%sNot Supported:%c%s')%(str_jnl_time_txt,sub_id,packet_info_delimitor,seq_msg_type,g_CR_LF)
+                result.append(str_warning)
+            else:
+                match_map_str = ""
                 if(msg_body_format[2] == True): # variable message
                     match_map_str = makeVariableMatch(match_map[0],findJnlVariableNum(match_map[0],g_tcp_data_buffer[data_start:]))
                 else:    
@@ -436,8 +442,6 @@ def parseRecoveryMessage(msgtype_list, sub_id, is_send_msg,str_jnl_time_txt):
                 for i in xrange(len(message_body)):
                     result.append(str(message_body[i]));
                 
-            except Exception,ex:
-                print Exception,":",ex
 
             processed = True
 
@@ -500,7 +504,7 @@ def parseMessagePacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_time
             # parse message body
             match_map = MESSAGE_FORMAT_MAP.get(type,())
             if(len(match_map)==0):
-                str_output = ('%s(%u)%s Not Supported:%c%s')%(str_jnl_time_txt,sub_id,PACKET_INFO_END,type,g_CR_LF)
+                str_output = ('%s(%u)%sNot Supported:%c%s')%(str_jnl_time_txt,sub_id,PACKET_INFO_END,type,g_CR_LF)
                 txt_file_output.append(str_output) 
                 num_of_messages += 1
                 continue

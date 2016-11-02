@@ -307,7 +307,7 @@ void TestingThreadTCP(shared_ptr<ClientInfor> client_info)
             if (recv_data_size >0 )
             {
                 if(ProcessRecv(ReceiveBuf, recv_data_size))
-                    ProcessSend();
+                    ProcessMessage();
             }
             else
             {
@@ -347,81 +347,162 @@ bool ProcessRecv(char *data_buffer, size_t data_size)
 
     }
 
-    const GlanceResponseHeader *return_data = reinterpret_cast<const LoginAccepted *>(ReceiveBuf);
-    char login_status = return_data->type;
-
-    printf("[%s]<=LoginStatus(%c),%c\n",client_info->name.c_str(),login_status,data_size);
-    if (login_status == 'A')
+    const uint8_t *current_position = processingContext.currentPosition;
+    size_t remaining = static_cast<size_t>(processingContext.remainingSegmentLength);
+    const uint8_t *return_position = nullptr;
+    if (DataSize_ > 0)
     {
-    SendInfo *send_infor = new SendInfo();
-    send_infor->send_sock = ClientSocket;
-    //send_infor->evt_stop = CreateEvent(NULL,true,false,NULL);
-    HANDLE worker = CreateThread(NULL, 0, HeartbeatThread, (LPVOID)(send_infor),0,NULL);
-
-    memset(ReceiveBuf,0,TCP_BUFF_SIZE);
-    int data_size_recv = 0,data_processed = 0;
-    bool is_last_pck = false;
-    while(true)
-    {
-    int data_size = recv(ClientSocket, ReceiveBuf + data_size_recv, TCP_BUFF_SIZE - data_size_recv, 0);
-    if (data_size <= 0)
-    {
-    printf("[%s] Waiting for data, timeout\n",client_info->name.c_str());
-    break;
+        // in the middle of a msg, try to copy the expected size
+        if (ExpectedSize_ == 0)
+        {
+            // can't parse in previous reading, now make msg length from buffer and new incoming
+            uint8_t size_memory[2];
+            uint16_t msg_length;
+            size_memory[0] = BufferData_[0];
+            size_memory[1] = *current_position;  // read 1 byte
+            memcpy_s(&msg_length, sizeof(msg_length), &size_memory, sizeof(size_memory));
+            ExpectedSize_ = FormatData(msg_length);
+            BufferData_[1] = *current_position; // buffer msg len
+            DataSize_++;
+            current_position++;
+            remaining--;
+        }
+        size_t copy_size = 0;
+        if (remaining >= ExpectedSize_)
+        {
+            // construct completed msg, put it in buffer
+            copy_size = ExpectedSize_;
+            ExpectedSize_ = 0;
+            return_position = current_position + copy_size;
+        }
+        else
+        {
+            // still not completed msg, continue buffer and wait
+            // block further process
+            copy_size = remaining;
+            ExpectedSize_ -= remaining;
+        }
+        // buffer msg body
+        memcpy_s(BufferData_ + DataSize_, size_t(BufferData_) - DataSize_, current_position, copy_size);
+        DataSize_ += copy_size;
     }
-    data_size_recv += data_size;
-    printf("[%s]<=Data(%d|%d)\n",client_info->name.c_str(),data_size,data_size_recv);
-    }
-    if (data_size_recv <= sizeof(GlanceResponseHeader))
+    else
     {
-    printf("[%s] Data less than min\n", client_info->name.c_str());
-    continue;
+        // get msg from starting, it contains msg header, try to copy full msg
+        if (remaining < sizeof(uint16_t))
+        {
+            // smaller than Minimal requirement, can't parse, buffer and wait for another 1 byte
+            // block further process
+            ExpectedSize_ = 0;
+            BufferData_[0] = *current_position;
+            DataSize_++;
+        }
+        else
+        {
+            // read length
+            uint16_t msg_length;
+            uint16_t copy_size = 0;
+            memcpy_s(&msg_length, sizeof(msg_length), current_position, sizeof(msg_length));
+            msg_length = FormatData(msg_length);
+            uint16_t one_msg_length = msg_length + sizeof(msg_length);
+            if (remaining < one_msg_length)
+            {
+                // incomplete msg, block further process
+                copy_size = (uint16_t)remaining;
+                ExpectedSize_ = one_msg_length - remaining;
+            }
+            else
+            {
+                // completed msg
+                copy_size = one_msg_length;
+                ExpectedSize_ = 0;
+                return_position = current_position + copy_size;
+            }
+            memcpy_s(BufferData_ + DataSize_, sizeof(BufferData_) - DataSize_, current_position, copy_size);
+            DataSize_ += copy_size;
+        }
     }
-    string output_file(request_info.output_file);
-    ofstream data_file(output_file.c_str(),ios::binary|ios::app);
-
-    char sjl_buffer[1024 * 8] = { 0 };
-
-    SjlPackageHeader sjl_package;
-    sjl_package.size = data_size_recv + sizeof(sjl_package);
-    sjl_package.bf0 = 1;
-    sjl_package.hp_counter = 377600777978373;
-
-    SjlPageHeader sjl_page;
-    sjl_page.version = 3;
-    sjl_page.jnl_page_size = sizeof(sjl_buffer);
-    sjl_page.offset = sizeof(sjl_package) + sizeof(sjl_page) + data_size_recv;
-    sjl_page.systime = time(NULL);
-    sjl_page.hp_counter = 377494019448199;
-    sjl_page.hp_frequency = 2396910000;
-    sjl_page.millisec = 55;
-
-    size_t written_len = 0;
-    memcpy(sjl_buffer, &sjl_page, sizeof(sjl_page));
-    written_len += sizeof(sjl_page);
-
-    memcpy(sjl_buffer + written_len, &sjl_package, sizeof(sjl_package));
-    written_len += sizeof(sjl_package);
-
-    memcpy(sjl_buffer + written_len, &ReceiveBuf, data_size_recv);
-    written_len += data_size_recv;
-
-    if(data_file.is_open())
-    {
-    data_file.write(sjl_buffer, sizeof(sjl_buffer));
-    data_file.flush();
-    data_file.close();
-    printf("[%s]JnlFile=>%s\n",client_info->name.c_str(),output_file.c_str());
-    }
-    
+    return return_position;
+   
 }
+
+    bool ProcessMessage()
+    {
+        const GlanceResponseHeader *return_data = reinterpret_cast<const LoginAccepted *>(ReceiveBuf);
+        char login_status = return_data->type;
+
+        printf("[%s]<=LoginStatus(%c),%c\n", client_info->name.c_str(), login_status, data_size);
+        if (login_status == 'A')
+        {
+            SendInfo *send_infor = new SendInfo();
+            send_infor->send_sock = ClientSocket;
+            //send_infor->evt_stop = CreateEvent(NULL,true,false,NULL);
+            HANDLE worker = CreateThread(NULL, 0, HeartbeatThread, (LPVOID)(send_infor), 0, NULL);
+
+            memset(ReceiveBuf, 0, TCP_BUFF_SIZE);
+            int data_size_recv = 0, data_processed = 0;
+            bool is_last_pck = false;
+            while (true)
+            {
+                int data_size = recv(ClientSocket, ReceiveBuf + data_size_recv, TCP_BUFF_SIZE - data_size_recv, 0);
+                if (data_size <= 0)
+                {
+                    printf("[%s] Waiting for data, timeout\n", client_info->name.c_str());
+                    break;
+                }
+                data_size_recv += data_size;
+                printf("[%s]<=Data(%d|%d)\n", client_info->name.c_str(), data_size, data_size_recv);
+            }
+            if (data_size_recv <= sizeof(GlanceResponseHeader))
+            {
+                printf("[%s] Data less than min\n", client_info->name.c_str());
+                continue;
+            }
+            string output_file(request_info.output_file);
+            ofstream data_file(output_file.c_str(), ios::binary | ios::app);
+
+            char sjl_buffer[1024 * 8] = { 0 };
+
+            SjlPackageHeader sjl_package;
+            sjl_package.size = data_size_recv + sizeof(sjl_package);
+            sjl_package.bf0 = 1;
+            sjl_package.hp_counter = 377600777978373;
+
+            SjlPageHeader sjl_page;
+            sjl_page.version = 3;
+            sjl_page.jnl_page_size = sizeof(sjl_buffer);
+            sjl_page.offset = sizeof(sjl_package) + sizeof(sjl_page) + data_size_recv;
+            sjl_page.systime = time(NULL);
+            sjl_page.hp_counter = 377494019448199;
+            sjl_page.hp_frequency = 2396910000;
+            sjl_page.millisec = 55;
+
+            size_t written_len = 0;
+            memcpy(sjl_buffer, &sjl_page, sizeof(sjl_page));
+            written_len += sizeof(sjl_page);
+
+            memcpy(sjl_buffer + written_len, &sjl_package, sizeof(sjl_package));
+            written_len += sizeof(sjl_package);
+
+            memcpy(sjl_buffer + written_len, &ReceiveBuf, data_size_recv);
+            written_len += data_size_recv;
+
+            if (data_file.is_open())
+            {
+                data_file.write(sjl_buffer, sizeof(sjl_buffer));
+                data_file.flush();
+                data_file.close();
+                printf("[%s]JnlFile=>%s\n", client_info->name.c_str(), output_file.c_str());
+            }
+
+    }
 
 void ProcessSend(SOCKET client_socket, char *send_buffer, size_t send_size)
 {
     ClientHeartbeat heartbeat;
     heartbeat.type = 'R';
     heartbeat.length = ReverseEndian(uint16_t(1));
-    memcpy_s(send_buffer, TCP_BUFF_SIZE, &heartbeat, sizeof(heartbeat));
+    memcpy_s(send_buffer, , &heartbeat, sizeof(heartbeat));
     SendData(client_socket,send_buffer,send_size);
 }
 
