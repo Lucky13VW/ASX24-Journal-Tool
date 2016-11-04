@@ -488,7 +488,7 @@ bool LoginRequestProcess(const shared_ptr<ServerInfor> &server_info,SOCKET clien
         login_status=login_accept.type = 'A';
         login_accept.length = ReverseEndian(uint16_t(sizeof(login_accept)-2));
         login_accept.sequence_number = ReverseEndian(uint64_t(1));
-        strncpy_s(login_accept.session, sizeof(login_accept.session), "ASX24TR123", 10);
+        memcpy(login_accept.session, "ASX24TR123", 10);
         memcpy_s(SendBuf,TCP_BUFF_SIZE,&login_accept,sizeof(LoginAccepted));
         send_data_size = sizeof(LoginAccepted);
         printf("[%s]=>LoginAccepted\n", server_info->name.c_str());
@@ -735,7 +735,7 @@ DWORD WINAPI ClientHandleThread(LPVOID lpParam)
                 {
                     shutdown(client_sockfd,0);
                     closesocket(client_sockfd);
-                    printf("[%s]LoginReject, disconnect!",server_info->name.c_str());
+                    printf("[%s]request type:%c, disconnect!",server_info->name.c_str(), glance_request->type);
                     break;
                 }
             }
