@@ -87,8 +87,7 @@ MESSAGE_FORMAT_q = '>IHIcI' # Request for Quote
 MESSAGE_FORMAT_Q = '>IHIcQIqc4sI' # Trade Report
 MESSAGE_FORMAT_V = '>IHIQQH' # Volume and Open Interest
 MESSAGE_FORMAT_W = '>IHIqqqqqq' # Anomalous Order Threshold Publish
-
-MESSAGE_FORMAT_G = '>Q'
+MESSAGE_FORMAT_G = '>Q' # End of sequenced data.
 
 MESSAGE_FORMAT_MAP = {
     'T': (MESSAGE_FORMAT_T, PASS_CONTR_NUM_IDX, False),
@@ -139,7 +138,7 @@ PACKET_HEADER_LABEL_LEN = len(PACKET_HEADER_LABEL)
 PACKET_HEADER_LABEL_SEND='<= '
 PACKET_HEADER_LABEL_SEND_LEN = len(PACKET_HEADER_LABEL_SEND)
 PACKET_INFO_END='_> '
-PACKET_INFO_SEND_END='_< '
+PACKET_INFO_SEND_END='<_ '
 PACKET_INFO_END_START = 30
 PACKET_INFO_END_STOP = PACKET_INFO_END_START + len(PACKET_INFO_END)
 
@@ -670,11 +669,8 @@ def generateJnl():
         
         if line_str == '':
             break
-   
-        # we don't take packet header, it will be calculated.
-        elif line_str[0:PACKET_HEADER_LABEL_LEN] == PACKET_HEADER_LABEL: 
-            continue
-        elif line_str[0:PACKET_HEADER_LABEL_SEND_LEN] == PACKET_HEADER_LABEL_SEND: 
+
+        if not GenerateLineFilter(line_str):
             continue
 
         if (len(line_str) > PACKET_INFO_END_STOP and line_str[PACKET_INFO_END_START:PACKET_INFO_END_STOP] == PACKET_INFO_END):
@@ -748,22 +744,20 @@ def generateRecJnl():
         
         if line_str == '':
             break
-            
-        # we don't take packet header, it will be calculated.
-        elif line_str[0:PACKET_HEADER_LABEL_LEN] == PACKET_HEADER_LABEL: 
-            continue
-        elif line_str[0:PACKET_HEADER_LABEL_SEND_LEN] == PACKET_HEADER_LABEL_SEND:
+
+        if not GenerateLineFilter(line_str):
             continue
 
-        packet_info_end_index = line_str.find(PACKET_INFO_END)
-        if packet_info_end_index != -1:
-            msg_body_str = line_str[packet_info_end_index+PACKET_INFO_END_LEN:] # don't take package header information part
+        if (len(line_str) > PACKET_INFO_END_STOP and line_str[PACKET_INFO_END_START:PACKET_INFO_END_STOP] == PACKET_INFO_END):
+            msg_body_str = line_str[PACKET_INFO_END_STOP:] # don't take package header information part
             msg_list = msg_body_str.rstrip().strip(g_CR_LF).split(g_delimiter)
         else:
             msg_list = line_str.rstrip().strip(g_CR_LF).split(g_delimiter)
 
+        if len(msg_list) < 2:
+            continue
 
-        if len(msg_list) < 3:
+        if msg_list[1] != 'S': # not sequenced message 'S', don't take it.
             continue
 
         msg_header_format,msg_body_format = findGlanceFormatForG(msg_list)
@@ -846,7 +840,19 @@ def writeJnlFile(msg_content_out, journal_file):
         for index in xrange(len(package_output)):
             journal_file.write(package_output[index])
         journal_file.write('\x00'*(JNL_ONE_PAGE_SIZE - page_len_ctrl))
-    
+
+def GenerateLineFilter(line_str):
+    taken = True
+    # we don't take packet header, it will be calculated.
+    if line_str[0:PACKET_HEADER_LABEL_LEN] == PACKET_HEADER_LABEL: # input packet header
+        taken = False
+    elif line_str[0:PACKET_HEADER_LABEL_SEND_LEN] == PACKET_HEADER_LABEL_SEND: # output packet header
+        taken = False
+    elif (len(line_str) > PACKET_INFO_END_STOP and line_str[PACKET_INFO_END_START:PACKET_INFO_END_STOP] == PACKET_INFO_SEND_END):
+        # output line
+        taken = False
+    return taken
+        
 def findGlanceFormatForI(msg_list,raw_data):
     # used for glance interpretation
     msg_header=''
@@ -913,8 +919,8 @@ COMMAND:
     -n <num_of_msg>             Optional, number of messages to interpret
     -s <sequence_number>        Optional, Generate jnl, sequence starts with this number.
     -d <delimiter>              Optional, Delimiter for field seperator, default '|'
-    -r                          Optional, Recovery mode for data from TCP line.
-    -p                          Optional, display packet header, no shown as default.
+    -r                          Optional, Recovery mode for interpret/generate journal.
+    -p                          Optional, Display packet header, valid only for UDP.
     -v                          Optional. Show version.
     -h                          Optional. Help info.
 
@@ -995,8 +1001,7 @@ def parse_arg():
             cmd_map = cmd_map | CMD_Help
                     
     return cmd_map
-    
-       
+           
 def main():
     cmd_map = parse_arg()
 
