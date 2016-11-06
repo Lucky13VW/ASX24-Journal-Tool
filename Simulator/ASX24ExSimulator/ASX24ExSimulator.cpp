@@ -15,8 +15,8 @@
 #include <vector>
 #include <fstream>
 #include <map>
-#include "ProtMsgs.hpp"
 #include <memory>
+#include "ProtMsgs.hpp"
 
 using namespace std;
 
@@ -619,21 +619,18 @@ bool ChangePasswordProcess(const shared_ptr<ServerInfor> &server_info, SOCKET cl
         
         int32_t status_n = 3001;
         if (!is_ok)
-            status_n = 52006;
+            status_n = 52006; // invalid username or password
             
         password_response.status = ReverseEndian(status_n);
 
         size_t total_sent_data = 0;
         size_t send_data_size = sizeof(password_response);
         memcpy_s(SendBuf, TCP_BUFF_SIZE, &password_response, send_data_size);
-        while (total_sent_data < send_data_size)
-        {
-            int sent_data_size = send(client_sockfd, SendBuf + total_sent_data, send_data_size - total_sent_data, 0);
-            total_sent_data += sent_data_size;
-        }
+        total_sent_data = SendData(client_sockfd, SendBuf, send_data_size);
+       
         printf("[%s]=>PasswordResetResponse(status:%d)\n", server_info->name.c_str(), status_n);
 
-        /*SnapshotComplete snap_shot_complate;
+        SnapShotComplete snap_shot_complate;
         snap_shot_complate.length = ReverseEndian(uint16_t(sizeof(snap_shot_complate) - sizeof(snap_shot_complate.length)));
         snap_shot_complate.type = 'S';
         snap_shot_complate.packet_type = 'G';
@@ -641,12 +638,8 @@ bool ChangePasswordProcess(const shared_ptr<ServerInfor> &server_info, SOCKET cl
 
         send_data_size = sizeof(snap_shot_complate);
         memcpy_s(SendBuf, TCP_BUFF_SIZE, &snap_shot_complate, send_data_size);
-        while (total_sent_data < send_data_size)
-        {
-            int sent_data_size = send(client_sockfd, SendBuf + total_sent_data, send_data_size - total_sent_data, 0);
-            total_sent_data += sent_data_size;
-        }
-        printf("[%s]=>PasswordResetDone\n", server_info->name.c_str());*/
+        SendData(client_sockfd, SendBuf, send_data_size);
+        printf("[%s]=>PasswordResetDone\n", server_info->name.c_str());
     }
     
     return is_ok;
@@ -728,6 +721,7 @@ DWORD WINAPI ClientHandleThread(LPVOID lpParam)
                     break;
                 case 'W':
                     ChangePasswordProcess(server_info, client_sockfd, ReceiveBuf, data_size_recv, SendBuf);
+                    is_login = false;
                     break;
                 }
 
@@ -890,8 +884,7 @@ int _tmain(int argc, char**argv)
             break;
         }
     }
-    //HANDLE hStopEvent = CreateEvent(NULL,true,false,NULL);
-    //WaitForMultipleObjects(hStopEvent,INFINITE);
+    
     return 0;
 }
 

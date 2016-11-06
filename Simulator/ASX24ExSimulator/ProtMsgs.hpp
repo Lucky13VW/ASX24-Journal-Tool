@@ -102,6 +102,15 @@ struct PasswordChangeResponse
     int32_t status;
 };
 
+struct SnapShotComplete
+{
+    uint16_t length;
+    char type; // S
+    char packet_type; // G
+    uint64_t sequence; 
+};
+
+
 struct SjlPageHeader
 {
     uint32_t version;
@@ -124,7 +133,6 @@ struct SjlPackageHeader
     uint32_t spare_0;
     uint64_t hp_counter;
 };
-
 #pragma pack(pop)
 
 #define UDP_BUFF_SIZE 1024*4
