@@ -460,9 +460,13 @@ bool LoginRequestProcess(const shared_ptr<ServerInfor> &server_info,SOCKET clien
     if(account!=server_info->rules.end())
     {
         //  && account->second.mem == login_mem
-        if (account->second.pass != login_pass || account->second.is_expired)
+        if (account->second.pass != login_pass)
         {
             reject_reason = -1;
+        }
+        else if (account->second.is_expired)
+        {
+            reject_reason = -3;
         }
         else if (account->second.mem != login_mem)
         {
@@ -498,7 +502,7 @@ bool LoginRequestProcess(const shared_ptr<ServerInfor> &server_info,SOCKET clien
         LoginRejected login_reject;
         login_status=login_reject.type = 'J';
         login_reject.length = ReverseEndian(uint16_t(sizeof(login_reject)-2));
-        login_reject.reject_reason_code = reject_reason;
+        login_reject.reject_reason_code = ReverseEndian(reject_reason);
         login_reject.error_code = 0;
         memcpy_s(SendBuf, TCP_BUFF_SIZE, &login_reject, sizeof(LoginRejected));
         send_data_size = sizeof(LoginRejected);
