@@ -8,7 +8,7 @@ import struct
 import re
 import binascii
 
-g_version = "2.4.x"
+g_version = "2.4.2"
 
 g_file_name = ""
 
@@ -340,6 +340,9 @@ def parseRecoveryPacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_tim
             # no buffer, start from begining
             if (remaining_size >= header_length_size ): # remaining length no less than length in glance header
                 glance_header_len = struct.unpack(HeaderLengthPart,body_data[data_start:data_start+header_length_size])
+                if(glance_header_len[0] == 0): # need to skip for padded data
+                    data_start += 1
+                    continue
                 one_msg_size = glance_header_len[0] + header_length_size # msg len =  length + sizeof(lengh part)
                 if (one_msg_size <= remaining_size):
                     # complete message
