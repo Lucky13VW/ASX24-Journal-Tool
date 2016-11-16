@@ -332,6 +332,9 @@ def parseRecoveryPacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_tim
     data_start = 0
     processed_size = 0
 
+    if (is_send_msg) and len(body_data)==3: # it's output heart beat 1|R
+        return (parseRecoveryMessage(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_time_txt),1)
+
     while (data_start < body_data_len):
         remaining_size = body_data_len - data_start
         one_msg_ready = False
@@ -340,9 +343,6 @@ def parseRecoveryPacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_tim
             # no buffer, start from begining
             if (remaining_size >= header_length_size ): # remaining length no less than length in glance header
                 glance_header_len = struct.unpack(HeaderLengthPart,body_data[data_start:data_start+header_length_size])
-                if(glance_header_len[0] == 0): # need to skip for padded data
-                    data_start += 1
-                    continue
                 one_msg_size = glance_header_len[0] + header_length_size # msg len =  length + sizeof(lengh part)
                 if (one_msg_size <= remaining_size):
                     # complete message
@@ -387,7 +387,7 @@ def parseRecoveryPacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_tim
             # one complete messaeg, parse it
             txt_output = ''
             try:
-                txt_output = parseRecoveryMessage(msgtype_list, sub_id, is_send_msg,str_jnl_time_txt)
+                txt_output = parseRecoveryMessage(g_tcp_data_buffer,msgtype_list, sub_id, is_send_msg,str_jnl_time_txt)
             except Exception,ex:
                 print Exception,":",ex
                 
@@ -401,15 +401,15 @@ def parseRecoveryPacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_tim
     
     return txt_file_output, num_of_messages
 
-def parseRecoveryMessage(msgtype_list, sub_id, is_send_msg,str_jnl_time_txt):
+def parseRecoveryMessage(recovery_data_buffer, msgtype_list, sub_id, is_send_msg,str_jnl_time_txt):
     # parse one complete message
     packet_info_delimitor = PACKET_INFO_END
     if is_send_msg:
         packet_info_delimitor = PACKET_INFO_SEND_END
 
     # process glance message header
-    glance_header_data = struct.unpack(GlanceResponse,g_tcp_data_buffer[0:struct.calcsize(GlanceResponse)])  
-    msg_header_format,msg_body_format,seq_msg_type = findGlanceFormatForI(glance_header_data,g_tcp_data_buffer)
+    glance_header_data = struct.unpack(GlanceResponse,recovery_data_buffer[0:struct.calcsize(GlanceResponse)])  
+    msg_header_format,msg_body_format,seq_msg_type = findGlanceFormatForI(glance_header_data,recovery_data_buffer)
 
     processed = False
     result = []
@@ -418,7 +418,7 @@ def parseRecoveryMessage(msgtype_list, sub_id, is_send_msg,str_jnl_time_txt):
     if (g_msgtype_list == []) or (seq_msg_type in msgtype_list):
         # interested msg type
         if (msg_header_format != ''):
-            message_header = struct.unpack(msg_header_format,g_tcp_data_buffer[0:struct.calcsize(msg_header_format)])
+            message_header = struct.unpack(msg_header_format,recovery_data_buffer[0:struct.calcsize(msg_header_format)])
             for i in xrange(len(message_header)):
                 result.append(str(message_header[i]));
 
@@ -434,12 +434,12 @@ def parseRecoveryMessage(msgtype_list, sub_id, is_send_msg,str_jnl_time_txt):
             else:
                 match_map_str = ""
                 if(msg_body_format[2] == True): # variable message
-                    match_map_str = makeVariableMatch(match_map[0],findJnlVariableNum(match_map[0],g_tcp_data_buffer[data_start:]))
+                    match_map_str = makeVariableMatch(match_map[0],findJnlVariableNum(match_map[0],recovery_data_buffer[data_start:]))
                 else:    
                     match_map_str = msg_body_format[0]
 
                 # parse message boday part
-                message_body = struct.unpack(match_map_str, g_tcp_data_buffer[data_start:data_start+struct.calcsize(match_map_str)])
+                message_body = struct.unpack(match_map_str, recovery_data_buffer[data_start:data_start+struct.calcsize(match_map_str)])
                 
                 for i in xrange(len(message_body)):
                     result.append(str(message_body[i]));
