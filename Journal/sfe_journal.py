@@ -368,6 +368,7 @@ def parseRecoveryPacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_tim
                 # no need to add len size, since buffer already includes length part
                 g_tcp_data_expected = glance_header_len[0]
                 data_start += 1
+                remaining_size -= 1
         
             if(g_tcp_data_expected <= remaining_size):
                 # one complete msg
@@ -379,9 +380,9 @@ def parseRecoveryPacket(body_data, msgtype_list, sub_id, is_send_msg,str_jnl_tim
                 g_tcp_data_expected -= remaining_size
 
         # copy data into tcp buffer
-        g_tcp_data_buffer += body_data[data_start: data_start+copy_size_offset]
-
-        data_start += copy_size_offset
+        if(copy_size_offset > 0):
+            g_tcp_data_buffer += body_data[data_start: data_start+copy_size_offset]
+            data_start += copy_size_offset
 
         if one_msg_ready:
             # one complete messaeg, parse it
