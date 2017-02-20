@@ -427,14 +427,14 @@ DWORD WINAPI DataSendThread(LPVOID lpParam)
     /*send(client_sockfd,SendBuf,1,0);
     send(client_sockfd,SendBuf+1,1,0);
     send(client_sockfd,SendBuf+2,3,0);
-    Sleep(1000);
+    
     send(client_sockfd,SendBuf+5,3,0);
     send(client_sockfd,SendBuf+8,34,0);
-    Sleep(5000);
+    
     send(client_sockfd,SendBuf+42,6,0);
-    Sleep(10000);
-    send(client_sockfd,SendBuf+48,send_data_size-48,0);*/
-    printf("[%s]DataTransferDone(%d)!\n",server_name,total_sent_data);
+    
+    send(client_sockfd,SendBuf+48,send_data_size-48,0);
+    printf("[%s]DataTransferDone(%d)!\n", server_name, send_data_size);*/
     
     delete send_info;
 
