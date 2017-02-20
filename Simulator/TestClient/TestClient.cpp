@@ -247,7 +247,7 @@ bool SendData(SOCKET client_socket, char *send_buff, size_t send_size)
 #define TCP_SEND_BUF_SIZE 1024
 static size_t tcp_data_expected = 0;
 static char tcp_data_buffer[TCP_BUFF_SIZE];
-
+/*
 void TestingThreadTCP(shared_ptr<ClientInfor> client_info)
 { 
     
@@ -504,7 +504,7 @@ void ProcessSend(SOCKET client_socket, char *send_buffer, size_t send_size)
     heartbeat.length = ReverseEndian(uint16_t(1));
     memcpy_s(send_buffer, , &heartbeat, sizeof(heartbeat));
     SendData(client_socket,send_buffer,send_size);
-}
+}*/
 
 int _tmain(int argc, char* argv[])
 {
@@ -519,7 +519,8 @@ int _tmain(int argc, char* argv[])
     {
         if (cur_info->prot == ProTCP)
         {
-            client_threads.push_back(thread(TestingThreadTCP, cur_info));
+            //client_threads.push_back(thread(TestingThreadTCP, cur_info));
+            cout << "Current version doesn't support TCP!" << endl;
         }
         else
         {
